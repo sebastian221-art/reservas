@@ -1,0 +1,5 @@
+Flask
+selenium
+twilio
+python-dotenv
+webdriver-manager
