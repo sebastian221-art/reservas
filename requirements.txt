@@ -3,3 +3,4 @@ selenium
 twilio
 python-dotenv
 webdriver-manager
+gunicorn
