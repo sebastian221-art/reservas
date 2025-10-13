@@ -1,35 +1,18 @@
+# main.py
 from flask import Flask, render_template, request, redirect, url_for
 import threading
 import time
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime, timedelta
 from twilio.rest import Client
 import os
 from dotenv import load_dotenv
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-
-options = Options()
-options.add_argument("--headless")  # necesario en servidores
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-
-driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 load_dotenv()
 
 app = Flask(__name__)
 
-# Twilio
+# === Twilio ===
 ACCOUNT_SID = os.getenv("TWILIO_SID")
 AUTH_TOKEN = os.getenv("TWILIO_TOKEN")
 TWILIO_WHATSAPP = os.getenv("TWILIO_WHATSAPP")
@@ -37,89 +20,101 @@ TWILIO_WHATSAPP = os.getenv("TWILIO_WHATSAPP")
 bot_thread = None
 bot_active = False
 
+TEETIME_URL = "https://clubcampestrebucaramanga.com/empresa/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09"
+INTENTOS = 50
+ESPERA_ENTRE_INTENTOS = 1
+
 def run_bot(user, password, destino):
     global bot_active
     bot_active = True
 
-    options = Options()
-    options.add_argument("--start-maximized")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    # webdriver-manager se encarga de descargar ChromeDriver
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
-    wait = WebDriverWait(driver, 20)
-
-    TEETIME_URL = "https://clubcampestrebucaramanga.com/empresa/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09"
-    INTENTOS = 50
-    ESPERA_ENTRE_INTENTOS = 1
-
     try:
-        driver.get("https://clubcampestrebucaramanga.com/empresa/login")
-        wait.until(EC.presence_of_element_located((By.ID, "txtEmail")))
-        driver.find_element(By.ID, "txtEmail").send_keys(user)
-        driver.find_element(By.ID, "txtPassword").send_keys(password)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)  # Headless para servidores
+            page = browser.new_page()
+            
+            # === Login ===
+            page.goto("https://clubcampestrebucaramanga.com/empresa/login")
+            page.fill("#txtEmail", user)
+            page.fill("#txtPassword", password)
+            
+            # Intentar click en botón "Ingresar"
+            try:
+                botones = page.query_selector_all("button.btn.btn-success.btn-block")
+                for btn in botones:
+                    if "Ingresar" in btn.inner_text():
+                        btn.click()
+                        break
+            except:
+                page.click("button[type='submit']")
+            
+            # Esperar a la página principal
+            page.wait_for_url("/empresa/home", timeout=15000)
+            print("✅ Inicio de sesión completado.")
+            
+            # === Ir a Teetime ===
+            page.goto(TEETIME_URL)
+            time.sleep(2)
+            
+            # Manejar iframe si existe
+            try:
+                frame = page.frame_locator("iframe")
+            except:
+                frame = page
 
-        botones = driver.find_elements(By.CSS_SELECTOR, "button.btn.btn-success.btn-block")
-        for btn in botones:
-            if "Ingresar" in btn.text:
-                btn.click()
-                break
+            manana = datetime.now() + timedelta(days=1)
+            fecha_texto = manana.strftime("%d-%m-%Y")
+            reserva_completada = False
+            intentos_realizados = 0
 
-        wait.until(EC.url_contains("/empresa/home"))
-        driver.get(TEETIME_URL)
-        time.sleep(2)
+            while bot_active and not reserva_completada and intentos_realizados < INTENTOS:
+                intentos_realizados += 1
 
-        try:
-            iframe = driver.find_element(By.TAG_NAME, "iframe")
-            driver.switch_to.frame(iframe)
-        except:
-            pass
+                # Buscar fechas
+                links_fecha = frame.locator("a").all()
+                fecha_disponible = None
+                for link in links_fecha:
+                    try:
+                        onclick = link.get_attribute("onclick") or ""
+                        text = link.inner_text() or ""
+                        if fecha_texto in onclick or fecha_texto in text:
+                            link.scroll_into_view_if_needed()
+                            link.click()
+                            time.sleep(0.5)
+                            fecha_disponible = link
+                            break
+                    except PlaywrightTimeoutError:
+                        continue
 
-        manana = datetime.now() + timedelta(days=1)
-        fecha_texto = manana.strftime("%d-%m-%Y")
-        reserva_completada = False
-        intentos_realizados = 0
+                if not fecha_disponible:
+                    time.sleep(ESPERA_ENTRE_INTENTOS)
+                    page.reload()
+                    continue
 
-        while bot_active and not reserva_completada and intentos_realizados < INTENTOS:
-            intentos_realizados += 1
-            links_fecha = driver.find_elements(By.XPATH, "//a[contains(@onclick, 'xajax_teeTimeFecha')]")
-            fecha_disponible = None
+                # Buscar primer horario disponible
+                botones_hora = frame.locator(".boton_tee").all()
+                if not botones_hora:
+                    time.sleep(ESPERA_ENTRE_INTENTOS)
+                    page.reload()
+                    continue
 
-            for link in links_fecha:
-                if fecha_texto in link.get_attribute("onclick") or fecha_texto in link.text:
-                    driver.execute_script("arguments[0].scrollIntoView(true);", link)
-                    time.sleep(0.1)
-                    link.click()
-                    time.sleep(0.5)
-                    fecha_disponible = link
-                    break
+                primer_boton = botones_hora[0]
+                primer_boton.scroll_into_view_if_needed()
+                primer_boton.click()
+                
+                # Enviar WhatsApp
+                client = Client(ACCOUNT_SID, AUTH_TOKEN)
+                client.messages.create(
+                    from_=TWILIO_WHATSAPP,
+                    body=f"✅ Reserva completada: {primer_boton.inner_text().strip()}",
+                    to=destino
+                )
+                reserva_completada = True
 
-            if not fecha_disponible:
-                time.sleep(ESPERA_ENTRE_INTENTOS)
-                driver.refresh()
-                continue
-
-            botones_hora = driver.find_elements(By.CLASS_NAME, "boton_tee")
-            if len(botones_hora) == 0:
-                time.sleep(ESPERA_ENTRE_INTENTOS)
-                driver.refresh()
-                continue
-
-            primer_boton = botones_hora[0]
-            driver.execute_script("arguments[0].scrollIntoView(true);", primer_boton)
-            time.sleep(0.2)
-            driver.execute_script("arguments[0].click();", primer_boton)
-
-            # Enviar mensaje WhatsApp
-            client = Client(ACCOUNT_SID, AUTH_TOKEN)
-            client.messages.create(
-                from_=TWILIO_WHATSAPP,
-                body=f"✅ Reserva completada: {primer_boton.text.strip()}",
-                to=destino
-            )
-            reserva_completada = True
+            browser.close()
 
     except Exception as e:
+        # Enviar mensaje si falla
         client = Client(ACCOUNT_SID, AUTH_TOKEN)
         client.messages.create(
             from_=TWILIO_WHATSAPP,
@@ -127,7 +122,6 @@ def run_bot(user, password, destino):
             to=destino
         )
     finally:
-        driver.quit()
         bot_active = False
 
 @app.route("/", methods=["GET", "POST"])
@@ -151,4 +145,4 @@ def index():
     return render_template("index.html", bot_active=bot_active)
 
 if __name__ == "__main__":
-    app.run(debug=False)  # debug=False para versión final
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

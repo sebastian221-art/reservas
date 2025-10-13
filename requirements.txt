@@ -1,7 +1,6 @@
 Flask
-selenium
 twilio
 python-dotenv
-webdriver-manager
-gunicorn
+playwright
 requests
+gunicorn
