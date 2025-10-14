@@ -13,9 +13,4 @@ services:
         value: "3.13.4"
       - key: PORT
         value: "10000"
-      - key: CLUB_USER    
-        fromSecret: CLUB_USER
-      - key: CLUB_PASSWORD
-        fromSecret: CLUB_PASSWORD
-      - key: CLUB_TELEFONO
-        fromSecret: CLUB_TELEFONO       
+      
