@@ -5,21 +5,22 @@ import os
 from datetime import datetime, timedelta
 from twilio.rest import Client
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+import requests
+from bs4 import BeautifulSoup
 
 load_dotenv()
-
 app = Flask(__name__)
 
 # === Twilio ===
 ACCOUNT_SID = os.getenv("TWILIO_SID")
-AUTH_TOKEN = os.getenv("TWILIO_TOKEN")
+AUTH_TOKEN = os.getenv("AUTH_TOKEN")
 TWILIO_WHATSAPP = os.getenv("TWILIO_WHATSAPP")
 
 # === Variables globales ===
 bot_thread = None
 bot_active = False
 bot_logs = []  # logs visibles desde el menú hamburguesa
+
 
 def log(msg: str):
     """Guarda y muestra mensajes del bot"""
@@ -28,111 +29,77 @@ def log(msg: str):
     if len(bot_logs) > 200:
         bot_logs.pop(0)
 
+
 def run_bot(user, password, destino):
-    """Ejecuta el bot principal"""
+    """Bot de reservas sin Playwright"""
     global bot_active
     bot_active = True
-    log("🚀 Bot iniciado...")
+    log("🚀 Bot iniciado (modo requests + BeautifulSoup)...")
+
+    session = requests.Session()
+    base_url = "https://clubcampestrebucaramanga.com"
 
     try:
-        with sync_playwright() as p:
-            # ✅ Configurar Chromium correctamente para Render
-            browser = p.chromium.launch(
-                headless=True,
-                executable_path=os.getenv("PLAYWRIGHT_CHROMIUM_PATH", None)
-            )
-            page = browser.new_page()
-            page.set_default_timeout(25000)
+        # === Iniciar sesión ===
+        login_url = f"{base_url}/empresa/login"
+        log("🌐 Iniciando sesión en el portal...")
 
-            log("🌐 Abriendo página de inicio de sesión...")
-            page.goto("https://clubcampestrebucaramanga.com/empresa/login", wait_until="domcontentloaded")
+        payload = {
+            "txtEmail": user,
+            "txtPassword": password
+        }
+        response = session.post(login_url, data=payload)
+        if "empresa/home" not in response.text:
+            raise Exception("Error al iniciar sesión. Credenciales incorrectas.")
 
-            page.fill("#txtEmail", user)
-            page.fill("#txtPassword", password)
-            page.click("button.btn.btn-success.btn-block, button[type='submit']")
+        log("✅ Sesión iniciada correctamente.")
 
-            # Esperar a que cargue el home
-            page.wait_for_url("**/empresa/home**", timeout=25000)
-            log("✅ Inicio de sesión exitoso.")
+        # === Acceder al módulo Tee Time ===
+        teetime_url = f"{base_url}/empresa/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09"
+        log("📄 Abriendo módulo TeeTime...")
+        r = session.get(teetime_url)
+        soup = BeautifulSoup(r.text, "html.parser")
 
-            # === Ir al módulo TeeTime ===
-            TEETIME_URL = "https://clubcampestrebucaramanga.com/empresa/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09"
-            page.goto(TEETIME_URL)
-            time.sleep(3)
+        # === Buscar el día siguiente ===
+        manana = datetime.now() + timedelta(days=1)
+        fecha_texto = manana.strftime("%d-%m-%Y")
+        log(f"🗓 Buscando la fecha: {fecha_texto}")
 
-            # === Intentar acceder al iframe ===
-            frames = page.frames
-            frame = None
-            for f in frames:
-                if "teetime" in (f.url or ""):
-                    frame = f
-                    break
+        filas = soup.select("table.mitabla tbody tr.mitabla")
+        fila_objetivo = None
 
-            if not frame:
-                frame = page.main_frame
-                log("⚠️ No se detectó iframe, usando frame principal.")
-            else:
-                log("📄 Iframe de TeeTime encontrado correctamente.")
+        for fila in filas:
+            if fecha_texto in fila.get_text():
+                fila_objetivo = fila
+                break
 
-            # === Buscar el día siguiente ===
-            manana = datetime.now() + timedelta(days=1)
-            fecha_texto = manana.strftime("%d-%m-%Y")
-            log(f"🗓 Buscando la fecha: {fecha_texto}")
+        if not fila_objetivo:
+            raise Exception("❌ No se encontró la fecha disponible para reserva.")
 
-            intentos = 0
-            reserva_completada = False
+        # Simular que entramos a la página del día
+        link = fila_objetivo.find("a")["href"]
+        detalle_url = f"{base_url}{link}"
+        log(f"🔗 Entrando a {detalle_url}")
+        r_detalle = session.get(detalle_url)
+        soup_detalle = BeautifulSoup(r_detalle.text, "html.parser")
 
-            while bot_active and not reserva_completada and intentos < 40:
-                intentos += 1
-                filas = frame.locator("table.mitabla tbody tr.mitabla")
-                count = filas.count()
-                log(f"🔎 Intento {intentos} - Filas encontradas: {count}")
+        botones = soup_detalle.select(".boton_tee")
+        if not botones:
+            raise Exception("❌ No se encontraron horarios disponibles.")
 
-                for i in range(count):
-                    try:
-                        celdas = filas.nth(i).locator("td")
-                        texto = celdas.nth(1).inner_text(timeout=1500)
-                        if fecha_texto in texto:
-                            log(f"✅ Fecha encontrada en fila {i + 1}")
-                            filas.nth(i).locator("a").click()
-                            time.sleep(2)
-                            reserva_completada = True
-                            break
-                    except Exception:
-                        continue
+        horario_texto = botones[0].get_text(strip=True)
+        log(f"⛳ Reserva simulada: {horario_texto}")
 
-                if not reserva_completada:
-                    time.sleep(2)
-                    try:
-                        frame.reload()
-                    except Exception:
-                        page.reload()
+        # === Enviar WhatsApp ===
+        client = Client(ACCOUNT_SID, AUTH_TOKEN)
+        client.messages.create(
+            from_=TWILIO_WHATSAPP,
+            body=f"✅ Reserva detectada con éxito para {fecha_texto} - Horario: {horario_texto}",
+            to=destino
+        )
 
-            if not reserva_completada:
-                raise Exception("❌ No se encontró la fecha o no había horarios disponibles.")
-
-            # === Buscar horarios ===
-            log("🔔 Buscando horarios disponibles...")
-            botones = frame.locator(".boton_tee")
-            if botones.count() == 0:
-                raise Exception("No se encontraron horarios disponibles.")
-
-            primer_horario = botones.nth(0)
-            horario_texto = primer_horario.inner_text()
-            primer_horario.click()
-            log(f"⛳ Reserva realizada en horario: {horario_texto}")
-
-            # === Enviar WhatsApp de confirmación ===
-            client = Client(ACCOUNT_SID, AUTH_TOKEN)
-            client.messages.create(
-                from_=TWILIO_WHATSAPP,
-                body=f"✅ Reserva completada con éxito para el {fecha_texto} - Horario: {horario_texto}",
-                to=destino
-            )
-            log("📩 Notificación de WhatsApp enviada.")
-
-            browser.close()
-            log("🎯 Bot finalizado correctamente.")
+        log("📩 Mensaje de confirmación enviado por WhatsApp.")
+        log("🎯 Bot finalizado correctamente.")
 
     except Exception as e:
         log(f"❌ Error: {e}")
@@ -147,6 +114,7 @@ def run_bot(user, password, destino):
             log("⚠️ No se pudo enviar mensaje de error por WhatsApp.")
     finally:
         bot_active = False
+
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -169,6 +137,7 @@ def index():
             return redirect(url_for("index"))
 
     return render_template("index.html", bot_active=bot_active, logs=bot_logs)
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
