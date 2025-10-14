@@ -11,3 +11,7 @@ services:
         value: /opt/render/.cache/ms-playwright
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+      - key: PORT
+        value: "10000"
