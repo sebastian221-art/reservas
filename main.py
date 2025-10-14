@@ -21,13 +21,12 @@ bot_thread = None
 bot_active = False
 bot_logs = []  # logs visibles desde el menú hamburguesa
 
-def log(msg):
-    """Guarda mensajes en la lista de logs"""
+def log(msg: str):
+    """Guarda y muestra mensajes del bot"""
     print(msg)
     bot_logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
-    if len(bot_logs) > 100:
+    if len(bot_logs) > 200:
         bot_logs.pop(0)
-
 
 def run_bot(user, password, destino):
     """Ejecuta el bot principal"""
@@ -37,32 +36,43 @@ def run_bot(user, password, destino):
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            # ✅ Configurar Chromium correctamente para Render
+            browser = p.chromium.launch(
+                headless=True,
+                executable_path=os.getenv("PLAYWRIGHT_CHROMIUM_PATH", None)
+            )
             page = browser.new_page()
-            page.set_default_timeout(20000)
+            page.set_default_timeout(25000)
 
             log("🌐 Abriendo página de inicio de sesión...")
-            page.goto("https://clubcampestrebucaramanga.com/empresa/login")
+            page.goto("https://clubcampestrebucaramanga.com/empresa/login", wait_until="domcontentloaded")
 
             page.fill("#txtEmail", user)
             page.fill("#txtPassword", password)
             page.click("button.btn.btn-success.btn-block, button[type='submit']")
 
-            page.wait_for_url("**/empresa/home**")
+            # Esperar a que cargue el home
+            page.wait_for_url("**/empresa/home**", timeout=25000)
             log("✅ Inicio de sesión exitoso.")
 
             # === Ir al módulo TeeTime ===
             TEETIME_URL = "https://clubcampestrebucaramanga.com/empresa/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09"
             page.goto(TEETIME_URL)
-            time.sleep(2)
+            time.sleep(3)
 
-            # === Intentar acceder al iframe o al frame principal ===
-            try:
-                frame = page.frame_locator("iframe")
-                log("📄 Iframe encontrado, entrando...")
-            except Exception:
+            # === Intentar acceder al iframe ===
+            frames = page.frames
+            frame = None
+            for f in frames:
+                if "teetime" in (f.url or ""):
+                    frame = f
+                    break
+
+            if not frame:
                 frame = page.main_frame
-                log("⚠️ No se encontró iframe, usando frame principal.")
+                log("⚠️ No se detectó iframe, usando frame principal.")
+            else:
+                log("📄 Iframe de TeeTime encontrado correctamente.")
 
             # === Buscar el día siguiente ===
             manana = datetime.now() + timedelta(days=1)
@@ -72,7 +82,6 @@ def run_bot(user, password, destino):
             intentos = 0
             reserva_completada = False
 
-            # Intentar hasta encontrar la fecha
             while bot_active and not reserva_completada and intentos < 40:
                 intentos += 1
                 filas = frame.locator("table.mitabla tbody tr.mitabla")
@@ -80,27 +89,33 @@ def run_bot(user, password, destino):
                 log(f"🔎 Intento {intentos} - Filas encontradas: {count}")
 
                 for i in range(count):
-                    celdas = filas.nth(i).locator("td")
-                    texto = celdas.nth(1).inner_text(timeout=1000)
-                    if fecha_texto in texto:
-                        log(f"✅ Fecha encontrada en fila {i + 1}")
-                        filas.nth(i).locator("a").click()
-                        time.sleep(2)
-                        reserva_completada = True
-                        break
+                    try:
+                        celdas = filas.nth(i).locator("td")
+                        texto = celdas.nth(1).inner_text(timeout=1500)
+                        if fecha_texto in texto:
+                            log(f"✅ Fecha encontrada en fila {i + 1}")
+                            filas.nth(i).locator("a").click()
+                            time.sleep(2)
+                            reserva_completada = True
+                            break
+                    except Exception:
+                        continue
 
                 if not reserva_completada:
                     time.sleep(2)
-                    frame.reload()
+                    try:
+                        frame.reload()
+                    except Exception:
+                        page.reload()
 
             if not reserva_completada:
-                raise Exception("❌ No se encontró la fecha o no había horarios disponibles")
+                raise Exception("❌ No se encontró la fecha o no había horarios disponibles.")
 
             # === Buscar horarios ===
             log("🔔 Buscando horarios disponibles...")
             botones = frame.locator(".boton_tee")
             if botones.count() == 0:
-                raise Exception("No se encontraron horarios disponibles")
+                raise Exception("No se encontraron horarios disponibles.")
 
             primer_horario = botones.nth(0)
             horario_texto = primer_horario.inner_text()
@@ -111,7 +126,7 @@ def run_bot(user, password, destino):
             client = Client(ACCOUNT_SID, AUTH_TOKEN)
             client.messages.create(
                 from_=TWILIO_WHATSAPP,
-                body=f"✅ Reserva completada con éxito: {horario_texto}",
+                body=f"✅ Reserva completada con éxito para el {fecha_texto} - Horario: {horario_texto}",
                 to=destino
             )
             log("📩 Notificación de WhatsApp enviada.")
@@ -133,10 +148,9 @@ def run_bot(user, password, destino):
     finally:
         bot_active = False
 
-
 @app.route("/", methods=["GET", "POST"])
 def index():
-    global bot_thread, bot_active  # ✅ Se declara arriba, no dentro del if
+    global bot_thread, bot_active
 
     if request.method == "POST":
         if "activar" in request.form:
@@ -155,7 +169,6 @@ def index():
             return redirect(url_for("index"))
 
     return render_template("index.html", bot_active=bot_active, logs=bot_logs)
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

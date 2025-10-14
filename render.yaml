@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: bot-clubcampestre
+    name: reservas
     env: python
     buildCommand: |
       pip install -r requirements.txt
@@ -9,8 +9,6 @@ services:
     envVars:
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /opt/render/.cache/ms-playwright
-      - key: PYTHONUNBUFFERED
-        value: "1"
       - key: PYTHON_VERSION
         value: "3.13.4"
       - key: PORT
