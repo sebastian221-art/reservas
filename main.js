@@ -23,6 +23,7 @@ function log(msg) {
     if (bot_logs.length > 200) bot_logs.shift();
 }
 
+// Función principal del bot
 async function runBot(user, password, destino) {
     bot_active = true;
     log("🚀 Bot iniciado (modo Axios + Cheerio)...");
@@ -33,7 +34,6 @@ async function runBot(user, password, destino) {
     });
 
     try {
-        // Login
         log("🌐 Iniciando sesión...");
         const loginForm = new URLSearchParams();
         loginForm.append('txtEmail', user);
@@ -47,45 +47,56 @@ async function runBot(user, password, destino) {
         if (!loginRes.data.includes('empresa/home')) {
             throw new Error("❌ Credenciales incorrectas");
         }
-
         log("✅ Sesión iniciada correctamente");
 
-        // Abrir TeeTime
-        log("📄 Abriendo módulo TeeTime...");
-        const teetimeRes = await session.get('/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09');
-        const $ = cheerio.load(teetimeRes.data);
-
+        // Loop hasta encontrar horario
+        let horarioEncontrado = false;
         const manana = new Date();
         manana.setDate(manana.getDate() + 1);
         const fechaTexto = manana.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        log(`🗓 Buscando la fecha: ${fechaTexto}`);
 
-        let linkDia = null;
-        $('table.mitabla tbody tr').each((i, el) => {
-            if ($(el).text().includes(fechaTexto)) {
-                linkDia = $(el).find('a').attr('href');
+        while (!horarioEncontrado && bot_active) {
+            log("📄 Abriendo módulo TeeTime...");
+            const teetimeRes = await session.get('/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09');
+            const $ = cheerio.load(teetimeRes.data);
+
+            let linkDia = null;
+            $('table.mitabla tbody tr').each((i, el) => {
+                if ($(el).text().includes(fechaTexto)) {
+                    linkDia = $(el).find('a').attr('href');
+                }
+            });
+
+            if (!linkDia) {
+                log("❌ No se encontró la fecha aún, reintentando en 5 segundos...");
+                await new Promise(r => setTimeout(r, 5000));
+                continue;
             }
-        });
 
-        if (!linkDia) throw new Error("❌ No se encontró la fecha disponible");
+            const detalleRes = await session.get(linkDia);
+            const $$ = cheerio.load(detalleRes.data);
+            const boton = $$('.boton_tee').first();
 
-        // Obtener horarios
-        const detalleRes = await session.get(linkDia);
-        const $$ = cheerio.load(detalleRes.data);
-        const boton = $$('.boton_tee').first();
-        if (!boton.length) throw new Error("❌ No hay horarios disponibles");
+            if (boton.length) {
+                const horario = boton.text().trim();
+                log(`⛳ Horario disponible encontrado: ${horario}`);
+                horarioEncontrado = true;
 
-        const horario = boton.text().trim();
-        log(`⛳ Reserva simulada: ${horario}`);
+                // Enviar WhatsApp
+                const client = new Client(ACCOUNT_SID, AUTH_TOKEN);
+                await client.messages.create({
+                    from: TWILIO_WHATSAPP,
+                    body: `✅ Reserva detectada para ${fechaTexto} - Horario: ${horario}`,
+                    to: destino
+                });
+                log("📩 Mensaje enviado por WhatsApp");
+            } else {
+                log("❌ Aún no hay horarios disponibles, reintentando en 5 segundos...");
+                await new Promise(r => setTimeout(r, 5000));
+            }
+        }
 
-        // Enviar WhatsApp
-        const client = new Client(ACCOUNT_SID, AUTH_TOKEN);
-        await client.messages.create({
-            from: TWILIO_WHATSAPP,
-            body: `✅ Reserva detectada para ${fechaTexto} - Horario: ${horario}`,
-            to: destino
-        });
-        log("📩 Mensaje enviado por WhatsApp");
+        if (!horarioEncontrado) log("❌ Bot finalizado sin encontrar horario");
 
     } catch (err) {
         log(`❌ Error: ${err.message}`);
@@ -104,15 +115,12 @@ async function runBot(user, password, destino) {
     }
 }
 
-app.get('/', (req, res) => {
-    res.render('index', { bot_active, logs: bot_logs });
-});
+// Rutas web
+app.get('/', (req, res) => res.render('index', { bot_active, logs: bot_logs }));
 
 app.post('/', async (req, res) => {
-    if (req.body.activar) {
-        if (!bot_active) {
-            runBot(req.body.user, req.body.password, req.body.telefono);
-        }
+    if (req.body.activar && !bot_active) {
+        runBot(req.body.user, req.body.password, req.body.telefono);
     } else if (req.body.pausar) {
         bot_active = false;
         log("⏸ Bot pausado manualmente");
