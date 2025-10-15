@@ -1,10 +1,10 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { Client } = require('twilio');
-const http = require('http');
-const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,21 +18,14 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN;
 const TWILIO_WHATSAPP = process.env.TWILIO_WHATSAPP;
 
 let bot_active = false;
-let bot_logs = [];
 
-// Función para enviar logs al panel en tiempo real
 function log(msg) {
     const timestamp = new Date().toLocaleTimeString();
     const line = `[${timestamp}] ${msg}`;
     console.log(line);
-    bot_logs.push(line);
-    if (bot_logs.length > 200) bot_logs.shift();
-
-    // Emitir log en vivo vía Socket.IO
-    io.emit('new_log', line);
+    io.emit('log', line);
 }
 
-// Bot principal
 async function runBot(user, password, destino) {
     bot_active = true;
     log("🚀 Bot iniciado (modo Axios + Cheerio)...");
@@ -43,7 +36,6 @@ async function runBot(user, password, destino) {
     });
 
     try {
-        // Login
         log("🌐 Iniciando sesión...");
         const loginForm = new URLSearchParams();
         loginForm.append('txtEmail', user);
@@ -54,13 +46,9 @@ async function runBot(user, password, destino) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
 
-        if (!loginRes.data.includes('empresa/home')) {
-            throw new Error("❌ Credenciales incorrectas");
-        }
-
+        if (!loginRes.data.includes('empresa/home')) throw new Error("❌ Credenciales incorrectas");
         log("✅ Sesión iniciada correctamente");
 
-        // Abrir TeeTime
         log("📄 Abriendo módulo TeeTime...");
         const teetimeRes = await session.get('/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09');
         const $ = cheerio.load(teetimeRes.data);
@@ -79,7 +67,6 @@ async function runBot(user, password, destino) {
 
         if (!linkDia) throw new Error("❌ No se encontró la fecha disponible");
 
-        // Obtener horarios
         const detalleRes = await session.get(linkDia);
         const $$ = cheerio.load(detalleRes.data);
         const boton = $$('.boton_tee').first();
@@ -88,7 +75,6 @@ async function runBot(user, password, destino) {
         const horario = boton.text().trim();
         log(`⛳ Reserva simulada: ${horario}`);
 
-        // Enviar WhatsApp
         const client = new Client(ACCOUNT_SID, AUTH_TOKEN);
         await client.messages.create({
             from: TWILIO_WHATSAPP,
@@ -114,17 +100,11 @@ async function runBot(user, password, destino) {
     }
 }
 
-// Rutas
-app.get('/', (req, res) => {
-    res.render('index', { bot_active, logs: bot_logs });
-});
+app.get('/', (req, res) => res.render('index', { bot_active, logs: [] }));
 
-app.post('/', async (req, res) => {
-    if (req.body.activar) {
-        if (!bot_active) {
-            runBot(req.body.user, req.body.password, req.body.telefono);
-            log("⏳ Bot activado manualmente por usuario");
-        }
+app.post('/', (req, res) => {
+    if (req.body.activar && !bot_active) {
+        runBot(req.body.user, req.body.password, req.body.telefono);
     } else if (req.body.pausar) {
         bot_active = false;
         log("⏸ Bot pausado manualmente");
@@ -132,6 +112,5 @@ app.post('/', async (req, res) => {
     res.redirect('/');
 });
 
-// Servidor con Socket.IO
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
