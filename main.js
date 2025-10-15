@@ -1,18 +1,17 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const { Client } = require('twilio');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const http = require('http');
-const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.urlencoded({ extended: true }));
-app.set('view engine', 'ejs');
-app.use(express.static('public')); // Para CSS/JS si quieres
+app.use(express.json());
+app.use(express.static('public')); // Servir index.html y otros archivos
 
 const ACCOUNT_SID = process.env.TWILIO_SID;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
@@ -27,7 +26,7 @@ function log(msg) {
     console.log(line);
     bot_logs.push(line);
     if (bot_logs.length > 200) bot_logs.shift();
-    io.emit('new-log', line); // Enviar log al navegador en tiempo real
+    io.emit('new-log', line);
 }
 
 async function runBot(user, password, destino) {
@@ -50,9 +49,7 @@ async function runBot(user, password, destino) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
 
-        if (!loginRes.data.includes('empresa/home')) {
-            throw new Error("❌ Credenciales incorrectas");
-        }
+        if (!loginRes.data.includes('empresa/home')) throw new Error("❌ Credenciales incorrectas");
         log("✅ Sesión iniciada correctamente");
 
         log("📄 Abriendo módulo TeeTime...");
@@ -66,9 +63,7 @@ async function runBot(user, password, destino) {
 
         let linkDia = null;
         $('table.mitabla tbody tr').each((i, el) => {
-            if ($(el).text().includes(fechaTexto)) {
-                linkDia = $(el).find('a').attr('href');
-            }
+            if ($(el).text().includes(fechaTexto)) linkDia = $(el).find('a').attr('href');
         });
 
         if (!linkDia) throw new Error("❌ No se encontró la fecha disponible");
@@ -106,25 +101,20 @@ async function runBot(user, password, destino) {
     }
 }
 
-// Rutas
-app.get('/', (req, res) => {
-    res.render('index', { bot_active, logs: bot_logs });
-});
-
-app.post('/', (req, res) => {
+// Rutas para activar/pausar bot
+app.post('/activar', (req, res) => {
     const { user, password, telefono } = req.body;
-    if (req.body.activar) {
-        if (!bot_active) runBot(user, password, telefono);
-    } else if (req.body.pausar) {
-        bot_active = false;
-        log("⏸ Bot pausado manualmente");
-    }
-    res.redirect('/');
+    if (!bot_active) runBot(user, password, telefono);
+    res.sendStatus(200);
 });
 
-io.on('connection', socket => {
-    console.log('Cliente conectado para logs en tiempo real');
+app.post('/pausar', (req, res) => {
+    bot_active = false;
+    log("⏸ Bot pausado manualmente");
+    res.sendStatus(200);
 });
+
+io.on('connection', () => console.log('Cliente conectado para logs'));
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
