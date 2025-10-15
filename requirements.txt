@@ -1,6 +1,0 @@
-Flask
-gunicorn
-twilio
-beautifulsoup4
-requests
-python-dotenv

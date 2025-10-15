@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Club Campestre Bot</title>
+</head>
+<body>
+    <h1>Bot de Reservas</h1>
+
+    <form method="POST">
+        <input type="text" name="user" placeholder="Usuario" required>
+        <input type="password" name="password" placeholder="Contraseña" required>
+        <input type="text" name="telefono" placeholder="WhatsApp Destino" required>
+        <button type="submit" name="activar">Activar Bot</button>
+        <button type="submit" name="pausar">Pausar Bot</button>
+    </form>
+
+    <h2>Logs</h2>
+    <div>
+        <% logs.forEach(function(log){ %>
+            <p><%= log %></p>
+        <% }); %>
+    </div>
+</body>
+</html>
