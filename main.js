@@ -28,7 +28,7 @@ function log(msg) {
 
 async function runBot(user, password, destino) {
     bot_active = true;
-    log("🚀 Bot iniciado (modo Axios + Cheerio)...");
+    log("🚀 Bot iniciado");
 
     const session = axios.create({
         baseURL: 'https://clubcampestrebucaramanga.com/empresa',
@@ -100,7 +100,7 @@ async function runBot(user, password, destino) {
     }
 }
 
-app.get('/', (req, res) => res.render('index', { bot_active, logs: [] }));
+app.get('/', (req, res) => res.render('index'));
 
 app.post('/', (req, res) => {
     if (req.body.activar && !bot_active) {
@@ -113,4 +113,4 @@ app.post('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));
+server.listen(PORT, () => log(`Servidor escuchando en puerto ${PORT}`));
