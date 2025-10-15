@@ -8,7 +8,7 @@ const path = require('path');
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'views')));
 
 const ACCOUNT_SID = process.env.TWILIO_SID;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
