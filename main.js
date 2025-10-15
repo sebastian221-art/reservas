@@ -1,10 +1,10 @@
 require('dotenv').config();
 const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const { Client } = require('twilio');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
@@ -18,17 +18,20 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN;
 const TWILIO_WHATSAPP = process.env.TWILIO_WHATSAPP;
 
 let bot_active = false;
+let bot_logs = [];
 
 function log(msg) {
     const timestamp = new Date().toLocaleTimeString();
     const line = `[${timestamp}] ${msg}`;
     console.log(line);
-    io.emit('log', line);
+    bot_logs.push(line);
+    if (bot_logs.length > 200) bot_logs.shift();
+    io.emit('log', line); // enviar log en tiempo real
 }
 
 async function runBot(user, password, destino) {
     bot_active = true;
-    log("🚀 Bot iniciado");
+    log("🚀 Bot iniciado...");
 
     const session = axios.create({
         baseURL: 'https://clubcampestrebucaramanga.com/empresa',
@@ -36,6 +39,7 @@ async function runBot(user, password, destino) {
     });
 
     try {
+        // Login
         log("🌐 Iniciando sesión...");
         const loginForm = new URLSearchParams();
         loginForm.append('txtEmail', user);
@@ -46,9 +50,13 @@ async function runBot(user, password, destino) {
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
         });
 
-        if (!loginRes.data.includes('empresa/home')) throw new Error("❌ Credenciales incorrectas");
+        if (!loginRes.data.includes('empresa/home')) {
+            throw new Error("❌ Credenciales incorrectas");
+        }
+
         log("✅ Sesión iniciada correctamente");
 
+        // Abrir TeeTime
         log("📄 Abriendo módulo TeeTime...");
         const teetimeRes = await session.get('/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09');
         const $ = cheerio.load(teetimeRes.data);
@@ -75,6 +83,7 @@ async function runBot(user, password, destino) {
         const horario = boton.text().trim();
         log(`⛳ Reserva simulada: ${horario}`);
 
+        // Enviar WhatsApp
         const client = new Client(ACCOUNT_SID, AUTH_TOKEN);
         await client.messages.create({
             from: TWILIO_WHATSAPP,
@@ -100,11 +109,13 @@ async function runBot(user, password, destino) {
     }
 }
 
-app.get('/', (req, res) => res.render('index'));
+app.get('/', (req, res) => {
+    res.render('index', { bot_active, logs: bot_logs });
+});
 
-app.post('/', (req, res) => {
-    if (req.body.activar && !bot_active) {
-        runBot(req.body.user, req.body.password, req.body.telefono);
+app.post('/', async (req, res) => {
+    if (req.body.activar) {
+        if (!bot_active) runBot(req.body.user, req.body.password, req.body.telefono);
     } else if (req.body.pausar) {
         bot_active = false;
         log("⏸ Bot pausado manualmente");
@@ -113,4 +124,4 @@ app.post('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => log(`Servidor escuchando en puerto ${PORT}`));
+server.listen(PORT, () => console.log(`Servidor escuchando en puerto ${PORT}`));

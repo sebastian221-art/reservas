@@ -2,15 +2,13 @@ services:
   - type: web
     name: clubcampestre-bot
     env: node
+    buildCommand: npm install
+    startCommand: npm start
     plan: free
-    buildCommand: "npm install"
-    startCommand: "npm start"
     envVars:
       - key: TWILIO_SID
-        fromSecret: TWILIO_SID
+        value: your_sid
       - key: AUTH_TOKEN
-        fromSecret: AUTH_TOKEN
+        value: your_auth_token
       - key: TWILIO_WHATSAPP
-        fromSecret: TWILIO_WHATSAPP
-      - key: PORT
-        value: "10000"
+        value: whatsapp:+14155238886
