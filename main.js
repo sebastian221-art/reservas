@@ -1,8 +1,8 @@
 require('dotenv').config();
 const express = require('express');
+const { Client } = require('twilio');
 const axios = require('axios');
 const cheerio = require('cheerio');
-const { Client } = require('twilio');
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -12,6 +12,7 @@ const io = new Server(server);
 
 app.use(express.urlencoded({ extended: true }));
 app.set('view engine', 'ejs');
+app.use(express.static('public')); // Para CSS/JS si quieres
 
 const ACCOUNT_SID = process.env.TWILIO_SID;
 const AUTH_TOKEN = process.env.AUTH_TOKEN;
@@ -26,7 +27,7 @@ function log(msg) {
     console.log(line);
     bot_logs.push(line);
     if (bot_logs.length > 200) bot_logs.shift();
-    io.emit('log', line); // enviar log en tiempo real
+    io.emit('new-log', line); // Enviar log al navegador en tiempo real
 }
 
 async function runBot(user, password, destino) {
@@ -39,7 +40,6 @@ async function runBot(user, password, destino) {
     });
 
     try {
-        // Login
         log("🌐 Iniciando sesión...");
         const loginForm = new URLSearchParams();
         loginForm.append('txtEmail', user);
@@ -53,10 +53,8 @@ async function runBot(user, password, destino) {
         if (!loginRes.data.includes('empresa/home')) {
             throw new Error("❌ Credenciales incorrectas");
         }
-
         log("✅ Sesión iniciada correctamente");
 
-        // Abrir TeeTime
         log("📄 Abriendo módulo TeeTime...");
         const teetimeRes = await session.get('/home/teetime/d2JjS0E1bCtmeFhlZ3FmMnBHa2RrUT09');
         const $ = cheerio.load(teetimeRes.data);
@@ -83,7 +81,6 @@ async function runBot(user, password, destino) {
         const horario = boton.text().trim();
         log(`⛳ Reserva simulada: ${horario}`);
 
-        // Enviar WhatsApp
         const client = new Client(ACCOUNT_SID, AUTH_TOKEN);
         await client.messages.create({
             from: TWILIO_WHATSAPP,
@@ -109,18 +106,24 @@ async function runBot(user, password, destino) {
     }
 }
 
+// Rutas
 app.get('/', (req, res) => {
     res.render('index', { bot_active, logs: bot_logs });
 });
 
-app.post('/', async (req, res) => {
+app.post('/', (req, res) => {
+    const { user, password, telefono } = req.body;
     if (req.body.activar) {
-        if (!bot_active) runBot(req.body.user, req.body.password, req.body.telefono);
+        if (!bot_active) runBot(user, password, telefono);
     } else if (req.body.pausar) {
         bot_active = false;
         log("⏸ Bot pausado manualmente");
     }
     res.redirect('/');
+});
+
+io.on('connection', socket => {
+    console.log('Cliente conectado para logs en tiempo real');
 });
 
 const PORT = process.env.PORT || 5000;

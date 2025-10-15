@@ -1,63 +1,48 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
+    <meta charset="UTF-8">
     <title>Club Campestre Bot</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { padding: 20px; background-color: #f8f9fa; }
-        #logs { max-height: 400px; overflow-y: auto; background: #fff; padding: 15px; border-radius: 8px; }
-        .navbar { margin-bottom: 20px; }
+        body { padding: 20px; background: #f5f5f5; }
+        .logs { height: 300px; overflow-y: scroll; background: #000; color: #0f0; padding: 10px; border-radius: 5px; }
+        .botones { margin-bottom: 20px; }
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark bg-success">
-  <div class="container-fluid">
-    <a class="navbar-brand" href="#">Club Campestre Bot</a>
-    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#menuLogs">
-      <span class="navbar-toggler-icon"></span>
-    </button>
-    <div class="collapse navbar-collapse" id="menuLogs">
-      <ul class="navbar-nav me-auto">
-        <li class="nav-item">
-          <span class="nav-link">Logs en tiempo real</span>
-        </li>
-      </ul>
-    </div>
-  </div>
-</nav>
-
 <div class="container">
-    <form method="POST" class="mb-4">
-        <div class="row g-2">
-            <div class="col-md-3"><input type="text" name="user" class="form-control" placeholder="Usuario" required></div>
-            <div class="col-md-3"><input type="password" name="password" class="form-control" placeholder="Contraseña" required></div>
-            <div class="col-md-3"><input type="text" name="telefono" class="form-control" placeholder="WhatsApp Destino" required></div>
-            <div class="col-md-3">
-                <button type="submit" name="activar" class="btn btn-success">Activar Bot</button>
-                <button type="submit" name="pausar" class="btn btn-warning">Pausar Bot</button>
-            </div>
+    <h1 class="mb-4">Bot de Reservas Club Campestre</h1>
+
+    <form method="POST" class="botones">
+        <div class="mb-2">
+            <input type="text" name="user" class="form-control" placeholder="Usuario" required>
         </div>
+        <div class="mb-2">
+            <input type="password" name="password" class="form-control" placeholder="Contraseña" required>
+        </div>
+        <div class="mb-2">
+            <input type="text" name="telefono" class="form-control" placeholder="WhatsApp Destino" required>
+        </div>
+        <button type="submit" name="activar" class="btn btn-success">Activar Bot</button>
+        <button type="submit" name="pausar" class="btn btn-danger">Pausar Bot</button>
     </form>
 
-    <div id="logs">
-        <% logs.forEach(function(log){ %>
-            <p><%= log %></p>
-        <% }); %>
-    </div>
+    <h3>Logs en tiempo real:</h3>
+    <div class="logs" id="logs"></div>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
 <script>
     const socket = io();
     const logsDiv = document.getElementById('logs');
 
-    socket.on('log', msg => {
+    socket.on('new-log', msg => {
         const p = document.createElement('p');
         p.textContent = msg;
         logsDiv.appendChild(p);
         logsDiv.scrollTop = logsDiv.scrollHeight;
     });
 </script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
